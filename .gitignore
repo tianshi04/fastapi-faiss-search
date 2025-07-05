@@ -1,0 +1,71 @@
+# --- Python Virtual Environments ---
+# Ignore the virtual environment directory.
+# This directory contains installed packages and can be very large.
+.venv/
+venv/
+env/
+
+# --- Python Cache & Bytecode ---
+# Ignore Python's generated files.
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# --- Project-Specific Ignores ---
+# Ignore the environment variables file. This file may contain sensitive keys.
+# DO NOT COMMIT THIS FILE.
+.env
+
+# Ignore runtime-generated data files.
+# The application should be able to create this directory and its contents on its own.
+# If you need to commit an empty directory, create a file named .gitkeep inside it.
+/data/
+
+# --- IDE / Editor Configuration ---
+# Visual Studio Code
+.vscode/
+# PyCharm
+.idea/
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+# Eclipse
+.project
+.pydevproject
+.settings/
+
+# --- Operating System Files ---
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# --- Build, Distribution, and Test Artifacts ---
+# Python distribution/packaging
+build/
+dist/
+*.egg-info/
+sdist/
+wheels/
+pip-wheel-metadata/
+
+# Pytest
+.pytest_cache/
+.tox/
+
+# Coverage reports
+.coverage
+.coverage.*
+htmlcov/
+nosetests.xml
+coverage.xml
+
+# --- Log Files ---
+*.log
+*.log.*
