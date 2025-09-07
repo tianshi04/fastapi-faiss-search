@@ -17,7 +17,7 @@ class FaissHandler:
         
         self.dimension = settings.VECTOR_DIMENSION  # QUAN TRỌNG: Phải khớp với chiều vector của bạn
         self.index = None
-        self.id_map = []
+        self.id_map: List[str] = []
         
         # Lock để đảm bảo việc ghi và thêm dữ liệu là thread-safe
         self.lock = threading.Lock()
@@ -44,7 +44,7 @@ class FaissHandler:
             else:
                 print("No existing index found. Initializing a new one.")
                 self.index = faiss.IndexFlatL2(self.dimension)
-                self.id_map = []
+                self.id_map: List[str] = []
         except Exception as e:
             print(f"Error loading data: {e}. Re-initializing.")
             self.index = faiss.IndexFlatL2(self.dimension)
@@ -63,19 +63,16 @@ class FaissHandler:
             # Nếu lỗi xảy ra, có thể file đã bị hỏng
             print(f"CRITICAL: Error saving data, files might be corrupted! Error: {e}")
 
-    def add(self, product_id: int, vector: List[float]):
+    def add(self, product_id: str, vector: List[float]):
         """Thêm một cặp (ID, vector) mới và lưu lại."""
         with self.lock:
             vector_np = np.array([vector]).astype('float32')
             self.index.add(vector_np)
             self.id_map.append(product_id)
             
-            # Gọi hàm save đơn giản
-            self.save()
-            
             return self.index.ntotal
 
-    def search(self, vector: List[float], k: int = 1) -> List[Tuple[int, float]]:
+    def search(self, vector: List[float], k: int = 1) -> List[Tuple[str, float]]:
         """Tìm kiếm k hàng xóm gần nhất cho một vector."""
         if self.index is None or self.index.ntotal == 0:
             return []
@@ -86,10 +83,16 @@ class FaissHandler:
         results = []
         for i in range(min(k, len(indices[0]))):
             result_idx = indices[0][i]
-            if result_idx == -1: continue
+            if result_idx == -1:
+                continue
 
             found_id = self.id_map[result_idx]
             dist = distances[0][i]
+            # Tính toán điểm tin cậy dựa trên khoảng cách.
+            # Công thức này chuẩn hóa khoảng cách L2 (dist) thành một giá trị từ 0.0 đến 1.0.
+            # dist = 0.0 (khoảng cách hoàn hảo) sẽ cho confidence = 1.0.
+            # dist = settings.DISTANCE_NORMALIZATION_FACTOR sẽ cho confidence = 0.0.
+            # Các khoảng cách lớn hơn NORMALIZATION_FACTOR sẽ bị cắt về 0.0.
             confidence = max(0.0, 1.0 - (dist / settings.DISTANCE_NORMALIZATION_FACTOR))
             results.append((found_id, float(confidence)))
             
@@ -104,7 +107,7 @@ class FaissHandler:
         with self.lock:
             # Tạo lại index mới
             self.index = faiss.IndexFlatL2(self.dimension)
-            self.id_map = []
+            self.id_map: List[str] = []
             
             # Gọi save để ghi đè các file cũ (hoặc tạo file rỗng)
             self.save()

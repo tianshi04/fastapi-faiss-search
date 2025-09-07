@@ -1,9 +1,10 @@
 # main.py
 
-from fastapi import FastAPI, HTTPException, Body
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from pydantic import BaseModel, Field
 from typing import List
 import uvicorn
+import json
 
 # Import class handler từ file faiss_handler.py
 from faiss_handler import FaissHandler
@@ -12,7 +13,7 @@ from config import settings
 # --- Pydantic Models để validate dữ liệu đầu vào ---
 
 class VectorInput(BaseModel):
-    product_id: int = Field(..., description="ID của sản phẩm, liên kết với CSDL quan hệ.")
+    product_id: str = Field(..., description="ID của sản phẩm, liên kết với CSDL quan hệ.")
     vector: List[float] = Field(..., description="Vector đặc trưng của sản phẩm.")
 
 class SearchInput(BaseModel):
@@ -42,27 +43,7 @@ def read_root():
         "total_vectors": db_handler.get_total_vectors()
     }
 
-@app.post("/add", summary="Thêm một vector sản phẩm mới")
-def add_vector(item: VectorInput):
-    """
-    Nhận một `product_id` và `vector`, thêm vào cơ sở dữ liệu FAISS.
-    Dữ liệu sẽ được lưu tự động.
-    """
-    if len(item.vector) != db_handler.dimension:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Vector dimension mismatch. Expected {db_handler.dimension}, got {len(item.vector)}."
-        )
-    
-    try:
-        total_vectors = db_handler.add(item.product_id, item.vector)
-        return {
-            "message": "Vector added successfully",
-            "product_id": item.product_id,
-            "total_vectors_in_db": total_vectors
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/search", summary="Tìm kiếm sản phẩm theo vector")
 def search_vector(item: SearchInput):
@@ -88,22 +69,66 @@ def search_vector(item: SearchInput):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.delete("/clear_all", summary="Xóa toàn bộ dữ liệu")
-def clear_all_data():
+@app.post("/upload_vectors", summary="Upload file JSON chứa nhiều vector sản phẩm")
+async def upload_vectors(file: UploadFile = File(...)):
     """
-    Endpoint nguy hiểm: Xóa toàn bộ index và các file liên quan.
-    Dùng cho việc reset hoặc gỡ lỗi.
+    Upload một file JSON chứa danh sách các đối tượng { "product_id": int, "vector": List[float] }.
+    Dữ liệu sẽ được thêm vào cơ sở dữ liệu FAISS.
     """
+    if file.content_type != "application/json":
+        raise HTTPException(status_code=400, detail="Chỉ chấp nhận file JSON.")
+
     try:
-        db_handler.clear_all()
-        return {"message": "All data has been cleared successfully."}
+        content = await file.read()
+        data = json.loads(content)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="File không phải là JSON hợp lệ.")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Lỗi khi đọc file: {e}")
+
+    if not isinstance(data, dict) or "vectors" not in data or not isinstance(data["vectors"], list):
+        raise HTTPException(status_code=400, detail="Nội dung JSON phải là một đối tượng có khóa 'vectors' chứa danh sách các đối tượng.")
+
+    vectors_data = data["vectors"]
+
+    added_count = 0
+    failed_count = 0
+    errors = []
+
+    for i, item_data in enumerate(vectors_data):
+        try:
+            # Map 'embedding' to 'vector' for Pydantic model
+            item_data_mapped = {"product_id": item_data.get("product_id"), "vector": item_data.get("embedding")}
+            item = VectorInput(**item_data_mapped)
+            if len(item.vector) != db_handler.dimension:
+                errors.append(f"Dòng {i+1} (product_id: {item.product_id}): Chiều vector không khớp. Mong đợi {db_handler.dimension}, nhận được {len(item.vector)}.")
+                failed_count += 1
+                continue
+
+            db_handler.add(item.product_id, item.vector)
+            added_count += 1
+        except Exception as e:
+            errors.append(f"Dòng {i+1}: Lỗi khi thêm dữ liệu (product_id: {item_data.get('product_id', 'N/A')}): {e}")
+            failed_count += 1
+
+    # Save the index after all vectors from the file have been processed
+    db_handler.save()
+
+    return {
+        "message": "Hoàn tất xử lý file.",
+        "total_records_in_file": len(vectors_data),
+        "vectors_added_successfully": added_count,
+        "vectors_failed_to_add": failed_count,
+        "errors": errors if errors else None,
+        "total_vectors_in_db": db_handler.get_total_vectors()
+    }
+
+
     
 # --- Entry point để chạy ứng dụng ---
 # Điều này cho phép chạy file bằng lệnh `python main.py`
 if __name__ == "__main__":
-    print(f"Starting server with the following settings:")
+    print("Starting server with the following settings:")
     print(f"  - Vector Dimension: {settings.VECTOR_DIMENSION}")
     print(f"  - Data Directory: {settings.DATA_DIR}")
     print(f"  - Listening on: {settings.API_HOST}:{settings.API_PORT}")
